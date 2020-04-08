@@ -6,6 +6,7 @@ import shutil
 import time
 from pathlib import Path
 from threading import Thread
+import solaris as sol
 
 import cv2
 import numpy as np
@@ -504,6 +505,88 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         for i, l in enumerate(label):
             l[:, 0] = i  # add target image index for build_targets()
         return torch.stack(img, 0), torch.cat(label, 0), path, shapes
+
+
+class RarePlanesDataset(Dataset):
+    """Dataset object for the RarePlanes project."""
+    def __init__(self, df, img_size=416, batch_size=16, ims_per_epoch=3200,
+                 augs=None, dtype=None, shuffle=True, min_hw=512, max_hw=512,
+                 const_ratio=None, max_empty_frac=0.5):
+        """Create a RarePlanesDataset object.
+
+        Arguments
+        ---------
+        df : `str` or :class:`pandas.DataFrame`
+            A :class:`pandas.DataFrame` object with columns ``"image"``,
+            ``"label"``, ``image_width``, and ``image_height``. This DataFrame
+            will be used to pull images for the dataset.
+
+        """
+        super().__init__()
+        self.df = sol.utils.core._check_df_load(df)
+        self.batch_size = batch_size
+        self.n_batches = ims_per_epoch//batch_size
+        self.ims_per_epoch = ims_per_epoch
+        self.shuffle = shuffle
+        self.rand_ims_per_aoi = rand_ims_per_aoi
+        self.n_ims_per_aoi = ims_per_aoi
+        self.max_empty_frac = max_empty_frac
+        self.min_hw = min_hw
+        self.max_hw = max_hw
+        self.const_ratio = const_ratio
+        if dtype is None:
+            self.dtype = np.float32
+        elif isinstance(dtype, str):
+            try:
+                self.dtype = getattr(np, dtype)
+            except AttributeError:
+                raise ValueError(
+                    'The data type {} is not supported'.format(dtype))
+        # lastly, check if it's already defined in the right format for use
+        elif issubclass(dtype, np.number) or isinstance(dtype, np.dtype):
+            self.dtype = dtype
+
+        self.on_epoch_end()
+
+    def on_epoch_end(self):
+        """Generate new image and label bounds for the next epoch."""
+        # get the extent of each image chip to be pulle
+
+        self.ep_sample = self.df.sample(n=self.ims_per_epoch,
+                                        replace=True)
+        if self.min_wh == self.max_wh:  # if it's a constant (w, h)
+            widths, heights = [self.min_wh]*self.ims_per_epoch, [self.min_wh]*self.ims_per_epoch
+        else:
+            widths = np.random.randint(self.min_wh, self.max_wh,
+                                       size=self.ims_per_epoch)
+            if self.const_ratio is not None:  # if the W:H ratio is static
+                heights = widths*self.const_ratio
+            else:  # if heights are also randomly drawn
+                heights = np.random.randint(self.min_wh, self.max_wh,
+                                            size=self.ims_per_epoch)
+
+        self.ep_sample['tile_width'] = widths
+        self.ep_sample['tile_height'] = heights
+        self.ep_sample[['w_start', 'h_start']] = self.ep_sample.apply(
+            self.get_tile_offset)
+        if not self.shuffle:
+            self.ep_sample.sort_values(['image', 'w_start', 'h_start'],
+                                       inplace=True)
+
+    def __len__(self):
+        return self.ims_per_epoch
+
+    def __getitem__(self, idx):
+        im = self.get_rasterio_tile()
+
+    @staticmethod
+    def get_tile_offset(df_row):
+        """Get the col_off, row_off numbers for random tiling."""
+        w_start = np.random.randint(
+            0, df_row['image_width']-df_row['tile_width'])
+        h_start = np.random.randint(
+            0, df_row['image_height']-df_row['tile_height'])
+        return [w_start, h_start]
 
 
 def load_image(self, index):
