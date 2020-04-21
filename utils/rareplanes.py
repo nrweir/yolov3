@@ -12,17 +12,39 @@ from torch.utils.data import Dataset
 class RarePlanesDataset(Dataset):
     """Dataset object for the RarePlanes project."""
 
-    def __init__(self, label_dir, im_dir, im_size=512, starting_epoch=1,
+    def __init__(self, label_dir, im_dir, starting_epoch=1,
                  batch_size=16, ims_per_epoch=3200, augs=None, dtype=None,
                  shuffle=True):
         """Create a RarePlanesDataset object.
 
         Arguments
         ---------
-        df : `str` or :class:`pandas.DataFrame`
-            A :class:`pandas.DataFrame` object with columns ``"image"``,
-            ``"label"``, ``image_width``, and ``image_height``. This DataFrame
-            will be used to pull images for the dataset.
+        label_dir : str
+            The directory containing YOLOv3-formatted label files. For
+            RarePlanes DA, the dir is usually called "tile_label_txts".
+        im_dir : str
+            The directory containing image files for the current stage of
+            training.
+        starting_epoch : int
+            The epoch to start training at. If a different one is picked,
+            training will start at a later set of tiles from the label set.
+        batch_size : int
+            Self-explanatory.
+        ims_per_epoch : int
+            The number of images to use in each epoch. This should not
+            exceed the number of label files present in each epoch's directory.
+        augs : dict
+            A dictionary in the same format as specified by solaris's configs
+            for augmentations. This is processed using solaris's augmentation
+            processor to create an albumentations Composer object to run
+            augmentations with.
+        dtype : `str` or np.dtype, optional
+            Allows you to specify  the dtype of your data. If not specified,
+            defaults to ``np.float32``.
+        shuffle : bool, optional
+            Should the order of samples be shuffled within the epoch? Note
+            that the tiles were generated randomly, so they're already random;
+            using this flag makes training _LESS_ reproducible.
 
         """
         super().__init__()
@@ -56,7 +78,10 @@ class RarePlanesDataset(Dataset):
         self.on_epoch_end()
 
     def on_epoch_end(self):
-        """Queue up the next set of geometries."""
+        """Queue up the next set of geometries.
+
+        ### MAKE SURE THIS GETS CALLED BETWEEN EPOCHS!!! ###
+        """
         # get the epoch label file fnames from their sub-directory
         self.ep_labels = [f for f in
                           os.listdir(self.label_dir, 'ep_' + str(self.next_epoch))
